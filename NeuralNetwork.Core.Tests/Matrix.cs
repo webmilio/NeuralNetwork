@@ -1,30 +1,24 @@
+﻿using System;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using NeuralNetwork.Core.Matrices;
 
 namespace NeuralNetwork.Core.Tests;
 
 [TestClass]
-public class MatrixDouble
+public class Matrix
 {
     private const int Rows = 4, Columns = 6; // Make sure these are always up-to-date!
-    private const double
-        Element1_1 = 74.5, Element1_2 = 4, Element1_3 = 13,
-        Element2_1 = 66, Element2_2 = 75.1, Element2_5 = 13,
-        Element3_4 = 17.7;
+    private const float
+        Element1_1 = 74.5f, Element1_2 = 4, Element1_3 = 13,
+        Element2_1 = 66, Element2_2 = 75.1f, Element2_5 = 13,
+        Element3_4 = 17.7f;
 
-    private double[,] _inner;
-    private Matrices.MatrixDouble _smallMatrix, _bigMatrix;
+    private float[,] _inner;
+    private Matrices.Matrix<float> _matrix;
 
     [TestInitialize]
     public void Setup()
     {
-        _smallMatrix = new(new double[,]
-        {
-            { 3,  7,  8 },
-            { 9, 20,  1 },
-            { 4,  3, 20 }
-        });
-
         _inner = new[,]
         {
             { 1,     2,          3,          4,      5,       6 }, // Do not change, used in a for-loop for columns vs rows access.
@@ -32,14 +26,14 @@ public class MatrixDouble
             { 3, Element2_1, Element2_2,    32,     35, Element2_5 },
             { 4,    79,         51,         12,  Element3_4,  1 }
         };
-        _bigMatrix = new(_inner);
+        _matrix = new(_inner);
     }
 
     [TestMethod]
     public void ArrayConstructor()
     {
-        Assert.AreEqual(Rows, _bigMatrix.Rows);
-        Assert.AreEqual(Columns, _bigMatrix.Columns);
+        Assert.AreEqual(Rows, _matrix.Rows);
+        Assert.AreEqual(Columns, _matrix.Columns);
     }
 
     [TestMethod]
@@ -54,9 +48,9 @@ public class MatrixDouble
     }
 
     [TestMethod]
-    public void Accessor() => Accessor(_bigMatrix);
+    public void Accessor() => Accessor(_matrix);
 
-    private static void Accessor(IMatrix<double> matrix)
+    private static void Accessor(IMatrix<float> matrix)
     {
         for (int i = 0; i < matrix.Columns; i++)
             Assert.AreEqual(i + 1, matrix[0, i]);
@@ -71,37 +65,32 @@ public class MatrixDouble
     [TestMethod]
     public void Clone()
     {
-        var clone = _bigMatrix.Clone() as Matrices.MatrixDouble;
+        var clone = _matrix.Clone();
         Accessor(clone);
 
-        Assert.AreEqual(_bigMatrix.Determinant, clone.Determinant);
-
         clone[0, 0]++;
-        Assert.AreNotEqual(clone[0, 0], _bigMatrix[0, 0]);
+        Assert.AreNotEqual(clone[0, 0], _matrix[0, 0]);
     }
 
     [TestMethod]
     public void Determinant()
     {
-        Assert.AreEqual(-465, _smallMatrix.Determinant);
-        Assert.AreEqual(double.NaN, _bigMatrix.Determinant);
+        Matrices.MatrixDouble matrix = new(new double[,]
+        {
+            { 3,  7,  8 },
+            { 9, 20,  1 },
+            { 4,  3, 20 }
+        });
+
+        Assert.AreEqual(-465, matrix.Determinant);
     }
 
     [TestMethod]
     public void InnerMatrix()
     {
-        for (int r = 0; r < _bigMatrix.Rows; r++)
-            for (int c = 0; c < _bigMatrix.Columns; c++)
-                Assert.AreEqual(_inner[r, c], _bigMatrix[r, c]);
-    }
-
-    [TestMethod]
-    public void Invalidate()
-    {
-        var clone = _smallMatrix.Clone() as Matrices.MatrixDouble;
-        clone[0, 0]++;
-
-        Assert.AreNotEqual(_smallMatrix.Determinant, clone.Determinant);
+        for (int r = 0; r < _matrix.Rows; r++)
+            for (int c = 0; c < _matrix.Columns; c++)
+                Assert.AreEqual(_inner[r, c], _matrix[r, c]);
     }
 
     [TestMethod]
@@ -109,7 +98,7 @@ public class MatrixDouble
     {
         const int resizeRows = Rows * 2, resizeColumns = Columns / 2;
 
-        var submatrix = _bigMatrix.Clone();
+        var submatrix = _matrix.Clone();
         submatrix.Resize(resizeRows, 0, resizeColumns, 0);
 
         Assert.AreEqual(resizeRows, submatrix.Rows);
@@ -125,7 +114,7 @@ public class MatrixDouble
     public void Resize_SmallerWithOffset()
     {
         const int resizeRows = 2, resizeColumns = 3;
-        var submatrix = _bigMatrix.Clone();
+        var submatrix = _matrix.Clone();
 
         submatrix.Resize(resizeRows, 1, resizeColumns, 2);
 
@@ -141,7 +130,7 @@ public class MatrixDouble
     public void Resize_BiggerWithOffset()
     {
         const int resizeRows = 5, resizeColumns = 5;
-        var submatrix = _bigMatrix.Clone();
+        var submatrix = _matrix.Clone();
 
         submatrix.Resize(resizeRows, 2, resizeColumns, 4);
 
@@ -157,7 +146,7 @@ public class MatrixDouble
     {
         const int subRows = 2, subColumns = 3;
 
-        var submatrix = _bigMatrix.Submatrix(subRows, 1, subColumns, 1);
+        var submatrix = _matrix.Submatrix(subRows, 1, subColumns, 1);
 
         Assert.AreEqual(subRows, submatrix.Rows);
         Assert.AreEqual(subColumns, submatrix.Columns);
