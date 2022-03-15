@@ -2,17 +2,16 @@
 
 namespace NeuralNetwork.Core.Matrices;
 
-public struct MatrixDouble : IMatrix<double>
+public class MatrixDouble : IMatrix<double>
 {
     private volatile object _lock = new();
-    public double[,] _matrix;
 
     public MatrixDouble(int rows, int columns)
     {
         Rows = rows;
         Columns = columns;
 
-        _matrix = new double[rows, columns];
+        InnerMatrix = new double[rows, columns];
     }
 
     public MatrixDouble(double[,] matrix)
@@ -20,17 +19,35 @@ public struct MatrixDouble : IMatrix<double>
         Rows = matrix.GetLength(0);
         Columns = matrix.GetLength(1);
 
-        _matrix = matrix;
+        InnerMatrix = matrix;
     }
 
-    public void Resize(int columns, int rows)
+    public void Resize(int rows, int columns) => Resize(rows, 0, columns, 0);
+
+    public void Resize(int rows, int originRow, int columns, int originColumn)
     {
+        if (originRow + rows <= 0 || originColumn + columns <= 0)
+            throw new ArgumentOutOfRangeException("The combination of rows/columns and origin points must be bigger than 0.");
+        
         lock (_lock)
         {
+            var previousRows = Rows;
+            var previousColumns = Columns;
+
             Rows = rows;
             Columns = columns;
 
-            _matrix = new double[rows, columns];
+            var previous = InnerMatrix;
+            InnerMatrix = new double[rows, columns];
+
+            Loop(delegate(IMatrix<double> matrix, int row, int column)
+            {
+                if (row + originRow >= previousRows |
+                    column + originColumn >= previousColumns)
+                    return;
+
+                matrix[row, column] = previous[row + originRow, column + originColumn];
+            });
         }
     }
 
@@ -41,22 +58,42 @@ public struct MatrixDouble : IMatrix<double>
                 action(this, r, c);
     }
 
-    public IMatrix<double> Submatrix(int rows, int columns) => Submatrix(0, rows, 0, columns);
+    public bool All(IMatrix<double>.LoopConditionDelegate condition)
+    {
+        for (int r = 0; r < Rows; r++)
+            for (int c = 0; c < Columns; c++)
+                if (!condition(this, r, c))
+                    return false;
 
-    public IMatrix<double> Submatrix(int sourceRow, int rows, int sourceColumn, int columns)
+        return true;
+    }
+
+    public bool Any(IMatrix<double>.LoopConditionDelegate condition)
+    {
+        for (int r = 0; r < Rows; r++)
+            for (int c = 0; c < Columns; c++)
+                if (condition(this, r, c))
+                    return true;
+
+        return false;
+    }
+
+    public IMatrix<double> Submatrix(int rows, int columns) => Submatrix(rows, 0, columns, 0);
+
+    public IMatrix<double> Submatrix(int rows, int sourceRow, int columns, int sourceColumn)
     {
         const string ErrorTemplate = "The addition of {0} and {1} must be a value between 0 and the upper corresponding dimension of the matrix.";
 
-        if (sourceColumn + rows < 0 || sourceColumn + rows > Columns)
-            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceColumn), nameof(rows)));
+        if (sourceRow + rows < 0 || sourceRow + rows > Rows)
+            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceColumn), nameof(columns)));
 
-        if (sourceRow + columns < 0 || sourceRow + columns > Rows)
-            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceRow), nameof(columns)));
+        if (sourceColumn + columns < 0 || sourceColumn + columns > Columns)
+            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceRow), nameof(rows)));
 
         MatrixDouble submatrix = new(rows, columns);
         var source = this;
 
-        submatrix.Loop((m, r, c) =>
+        submatrix.Loop(delegate (IMatrix<double> m, int r, int c)
         {
             m[r, c] = source[r + sourceRow, c + sourceColumn];
         });
@@ -71,61 +108,72 @@ public struct MatrixDouble : IMatrix<double>
         lock (_lock)
         {
             inverse = new(Rows, Columns);
-            Array.Copy(_matrix, inverse._matrix, _matrix.Length);
+            Array.Copy(InnerMatrix, inverse.InnerMatrix, InnerMatrix.Length);
         }
+
+
 
         return inverse;
     }
 
     public void Apply(IMatrix<double> matrix) => Apply(matrix, 0, 0);
-    public void Apply(IMatrix<double> matrix, int destinationX, int destinationY) => Apply(matrix, 0, destinationX, 0, destinationY);
+    public void Apply(IMatrix<double> matrix, int destinationRow, int destinationColumn) => Apply(matrix, 0, destinationRow, 0, destinationColumn);
 
-    public void Apply(IMatrix<double> matrix, int sourceX, int destinationX, int sourceY, int destinationY)
+    public void Apply(IMatrix<double> matrix, int sourceRow, int destinationRow, int sourceColumn, int destinationColumn)
     {
         const string ErrorTemplate = "Parameter {0} or {1} is out of range; must be a positive integer within the boundaries of {2}. ";
 
-        if (destinationX < 0 || destinationX >= Columns ||
-            destinationY < 0 || destinationY >= Rows)
-            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(destinationX), nameof(destinationY), "the target matrix"));
+        if (destinationColumn < 0 || destinationColumn >= Columns ||
+            destinationRow < 0 || destinationRow >= Rows)
+            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(destinationColumn), nameof(destinationRow), "the target matrix"));
 
-        if (sourceX < 0 || sourceX >= matrix.Columns ||
-            sourceY < 0 || sourceY >= matrix.Rows)
-            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceX), nameof(sourceY), $"the provided {nameof(matrix)}"));
+        if (sourceColumn < 0 || sourceColumn >= matrix.Columns ||
+            sourceRow < 0 || sourceRow >= matrix.Rows)
+            throw new ArgumentOutOfRangeException(string.Format(ErrorTemplate, nameof(sourceColumn), nameof(sourceRow), $"the provided {nameof(matrix)}"));
 
-        if (matrix.Columns - sourceX + destinationX > Columns ||
-            matrix.Rows - sourceY + destinationY > Rows)
+        if (matrix.Columns - sourceColumn + destinationColumn > Columns ||
+            matrix.Rows - sourceRow + destinationRow > Rows)
             throw new ArgumentOutOfRangeException("The addition of destination and source arguments to the length of the supplied matrix " +
                 "must not result in a row index or column index outside the bounds of the target matrix.");
 
-        Loop((m, r, c) =>
+        Invalidate();
+
+        Loop(delegate (IMatrix<double> m, int r, int c)
         {
-            m[destinationY + r, destinationX + c] = matrix.InnerMatrix[sourceY + r, sourceX + c];
+            m[r + destinationRow, c + destinationColumn] = matrix.InnerMatrix[r + sourceRow, c + sourceColumn];
         });
+    }
+
+    protected void Invalidate()
+    {
+        _determinant = null;
+    }
+
+    public IMatrix<double> Clone()
+    {
+        var clone = (MatrixDouble) Submatrix(Rows, Columns);
+        clone._determinant = _determinant;
+
+        return clone;
     }
 
     public double this[int row, int column]
     {
-        get
-        {
-            return _matrix[row, column];
-        }
+        get => InnerMatrix[row, column];
         set
         {
-            _matrix[row, column] = value;
-        }
-    }
+            Invalidate();
 
-    private void Invalidate()
-    {
-        _determinant = null;
+            InnerMatrix[row, column] = value;
+        }
     }
 
     public int Rows { get; private set; }
     public int Columns { get; private set; }
 
-    public double[,] InnerMatrix => _matrix;
+    public double[,] InnerMatrix { get; private set; }
 
-    private double? _determinant = null;
+    private double? _determinant;
     public double Determinant
     {
         get
@@ -135,19 +183,45 @@ public struct MatrixDouble : IMatrix<double>
                 if (_determinant.HasValue)
                     return _determinant.Value;
 
+                if (Rows != Columns)
+                    return double.NaN;
+
+                if (Rows == 1)
+                    return this[0, 0];
+
                 // Calculate and Store.
                 double sum = 0;
-                double tmp = 0;
+                
+                int sign = 1;
+                int upperBound = Columns - 1;
 
-                for (int x = 0; x < Columns; x++)
+                for (int c = 0; !(c == Columns && sign < 0); c++)
                 {
-                    for (int y = 0; x < Rows; y++)
-                    {
+                    double tmp = sign;
 
+                    for (int i = 0; i < Rows; i++)
+                    {
+                        int nC = c + i * sign;
+
+                        if (nC >= Columns)
+                            nC -= Columns;
+                        else if (nC < 0)
+                            nC += Columns;
+
+                        tmp *= this[i, nC];
+                    }
+
+                    sum += tmp;
+
+                    if (c == upperBound && sign > 0)
+                    {
+                        c = -1;
+                        sign = -1;
                     }
                 }
 
-                return 0;
+                _determinant = sum;
+                return sum;
             }
         }
     }
